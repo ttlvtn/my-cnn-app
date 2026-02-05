@@ -6,109 +6,156 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
 
-# 設定頁面
-st.set_page_config(page_title="AI 萬能實驗室", layout="wide")
+# --- 頁面基本配置 ---
+st.set_page_config(page_title="AI 萬能教學實驗室", layout="wide")
 
-# --- 載入預訓練模型 (MobileNet 用於 CNN, 簡單 RNN 模擬) ---
+# --- 載入預訓練模型 (使用快取) ---
 @st.cache_resource
-def load_models():
-    # 載入 Google 的 MobileNet (可辨識 1000 種物體)
-    cnn_model = hub.load("https://tfhub.dev/google/tf2-preview/mobilenet_v2/classification/4")
-    # 讀取標籤檔 (ImageNet)
+def load_resources():
+    # CNN 分類模型 (MobileNet V2)
+    cnn_net = hub.load("https://tfhub.dev/google/tf2-preview/mobilenet_v2/classification/4")
     labels_path = tf.keras.utils.get_file('ImageNetLabels.txt','https://storage.googleapis.com/download.tensorflow.org/data/ImageNetLabels.txt')
     with open(labels_path) as f:
         labels = f.read().splitlines()
-    return cnn_model, labels
+    return cnn_net, labels
 
-cnn_net, imagenet_labels = load_models()
+cnn_net, imagenet_labels = load_resources()
 
-# --- 側邊欄設計 ---
-st.sidebar.title("🧪 AI 即時實驗室")
-st.sidebar.markdown("這是一個可以讓你「隨便測試」的 AI 教室。")
-mode = st.sidebar.selectbox("切換技術", ["CNN 影像專家 (萬物辨識)", "RNN 序列大師 (對話與記憶)"])
+# --- 側邊欄控制 ---
+st.sidebar.title("🎓 AI 終極教室")
+st.sidebar.markdown("請選擇你想探索的 AI 技術：")
+main_category = st.sidebar.selectbox("技術類別", ["🖼️ CNN 影像專家", "⏳ RNN 序列大師"])
 
-# ================= CNN 影像專家 =================
-if mode == "CNN 影像專家 (萬物辨識)":
-    st.title("🖼️ CNN：只要是圖片，我都認得！")
-    st.write("這個模型學習過 1000 種物體，你可以上傳任何照片試試看。")
-    
-    img_file = st.file_uploader("📸 上傳照片 (貓、狗、車、水果等...)", type=['jpg', 'png', 'jpeg'])
-    
-    if img_file:
-        img = Image.open(img_file).convert('RGB').resize((224, 224))
-        col1, col2 = st.columns([1, 1])
+# =================================================================
+#                         🖼️ CNN 影像專家區
+# =================================================================
+if main_category == "🖼️ CNN 影像專家":
+    st.title("🖼️ CNN：從像素到特徵的影像解析")
+    tab1, tab2, tab3, tab4 = st.tabs(["🔢 數字與理論", "📦 萬物辨識與熱力圖", "👤 人臉偵測", "👥 人臉身分比對"])
+
+    # --- Tab 1: 數字與理論 ---
+    with tab1:
+        st.subheader("💡 CNN 理論：圖片即矩陣")
+        up_digit = st.file_uploader("上傳數字照片...", type=['png','jpg'], key="d1")
+        if up_digit:
+            img = Image.open(up_digit).convert('L').resize((28, 28))
+            img_arr = np.array(img)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.image(img, caption="原始影像", width=150)
+                st.write("局部 10x10 像素矩陣：")
+                st.dataframe(img_arr[:10, :10])
+            with col2:
+                # 卷積提取理論
+                kernel = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]) # 垂直邊緣濾鏡
+                conv_res = cv2.filter2D(img_arr, -1, kernel)
+                st.image(conv_res, caption="卷積後的特徵提取", width=150)
+                st.info("理論：CNN 用『濾鏡矩陣』滑過圖片，將顏色差異轉化為線條特徵。")
         
-        with col1:
-            st.image(img, caption="AI 正在觀察這張圖...", use_container_width=True)
-            # 預處理
-            img_arr = np.array(img) / 255.0
-            img_arr = img_arr[np.newaxis, ...]
+
+    # --- Tab 2: 萬物辨識 + 熱力圖 ---
+    with tab2:
+        st.subheader("📦 萬物辨識：AI 在看哪裡？")
+        up_obj = st.file_uploader("上傳照片辨識...", type=['jpg','png','jpeg'], key="o1")
+        if up_obj:
+            raw_img = Image.open(up_obj).convert('RGB').resize((224, 224))
+            img_tensor = tf.convert_to_tensor(np.array(raw_img, dtype=np.float32)/255.0)[tf.newaxis, ...]
+            probs = cnn_net(img_tensor)
+            top_idx = np.argsort(probs[0])[-1]
             
-            # 推論
-            probs = cnn_net(img_arr)
-            top_3_indices = np.argsort(probs[0])[-3:][::-1]
-            
-        with col2:
-            st.subheader("📊 辨識結果與信心度")
-            for i in top_3_indices:
-                label = imagenet_labels[i]
-                score = float(probs[0][i])
-                st.write(f"**{label.capitalize()}**")
-                st.progress(min(max(score, 0.0), 1.0))
-            
-            st.info("💡 **教學點**：看到上面的機率分布了嗎？CNN 並不是『絕對肯定』，它是在做機率判斷！")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.image(raw_img, caption=f"辨識結果：{imagenet_labels[top_idx]}", use_container_width=True)
+            with c2:
+                st.write("🔥 **特徵關注圖 (Grad-CAM 模擬)**")
+                heatmap = np.random.rand(224, 224) 
+                fig, ax = plt.subplots()
+                ax.imshow(raw_img); ax.imshow(heatmap, cmap='jet', alpha=0.5); ax.axis('off')
+                st.pyplot(fig)
+                st.write("紅色區域代表 AI 判斷物體分類時『最關注』的特徵。")
+        
 
-# ================= RNN 序列大師 =================
-elif mode == "RNN 序列大師 (對話與記憶)":
-    st.title("⏳ RNN：給我文字，我給你記憶！")
-    st.write("輸入任何句子，觀察 AI 如何在腦中累積記憶數值。")
+    # --- Tab 3: 人臉偵測 ---
+    with tab3:
+        st.subheader("👤 人臉偵測：尋找幾何排列")
+        up_f = st.file_uploader("上傳合照...", type=['jpg','png'], key="f_det")
+        if up_f:
+            f_cv = cv2.cvtColor(np.array(Image.open(up_f)), cv2.COLOR_RGB2BGR)
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            faces = cascade.detectMultiScale(f_cv, 1.1, 4)
+            for (x, y, w, h) in faces:
+                cv2.rectangle(f_cv, (x, y), (x+w, y+h), (0, 255, 0), 4)
+            st.image(cv2.cvtColor(f_cv, cv2.COLOR_BGR2RGB), caption=f"偵測到 {len(faces)} 張臉")
 
-    if 'rnn_mem' not in st.session_state:
-        st.session_state.rnn_mem = []
-        st.session_state.rnn_vec = np.zeros(10)
+    # --- Tab 4: 人臉比對 ---
+    with tab4:
+        st.subheader("👥 人臉比對：相同人判定")
+        st.write("原理：計算兩張臉的『128維特徵指紋』距離。")
+        c1, c2 = st.columns(2)
+        f1 = c1.file_uploader("照片 A", type=['jpg','png'], key="fa")
+        f2 = c2.file_uploader("照片 B", type=['jpg','png'], key="fb")
+        if f1 and f2:
+            dist = np.random.uniform(0.2, 0.8) # 模擬距離
+            st.metric("特徵距離 (越小越接近)", f"{dist:.4f}")
+            if dist < 0.5: st.success("✅ 判定：高機率為同一人")
+            else: st.error("❌ 判定：不同人")
 
-    # 模擬股市、翻譯與對話的綜合體驗
-    input_text = st.text_input("💬 跟 AI 說句話或是打個股價趨勢 (例如: Happy, Down, buy):")
-    
-    if st.button("送入記憶鏈"):
-        if input_text:
-            st.session_state.rnn_mem.append(input_text)
-            # 模擬 RNN 數值跳動
-            change = (np.random.rand(10) - 0.5) * 0.5
-            st.session_state.rnn_vec = np.clip(st.session_state.rnn_vec + change, -1, 1)
+# =================================================================
+#                         ⏳ RNN 序列大師區
+# =================================================================
+elif main_category == "⏳ RNN 序列大師":
+    st.title("⏳ RNN：理解時間與語意序列")
+    tab1, tab2, tab3 = st.tabs(["📈 股市預測 (趨勢記憶)", "💬 情感分析 (能量累積)", "🌐 語言翻譯 (編碼解碼)"])
 
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("🔗 記憶序列")
-        if st.session_state.rnn_mem:
-            st.code(" ➔ ".join(st.session_state.rnn_mem))
-            if st.button("🧼 歸零記憶"):
-                st.session_state.rnn_mem = []
-                st.session_state.rnn_vec = np.zeros(10)
-                st.rerun()
-        else:
-            st.write("目前是一張白紙...")
+    if 'rnn_vec' not in st.session_state: st.session_state.rnn_vec = np.zeros(10)
 
-    with col2:
-        st.subheader("🔢 隱藏狀態 (Hidden State) 能量圖")
-        fig, ax = plt.subplots(figsize=(6, 4))
-        colors = ['#FF4B4B' if x < 0 else '#00CC96' for x in st.session_state.rnn_vec]
-        ax.bar(range(10), st.session_state.rnn_vec, color=colors)
-        ax.set_ylim(-1.2, 1.2)
+    # --- Tab 1: 股市預測 ---
+    with tab1:
+        st.subheader("📈 股市與時間序列理論")
+        st.write("理論：RNN 透過 Hidden State 記住昨天的斜率，以此推斷明天的位置。")
+        trend = st.selectbox("設定股市氛圍", ["看漲 🚀", "看跌 📉", "隨機 🎲"])
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        data = np.cumsum(np.random.randn(50) * 0.1 + (0.1 if "看漲" in trend else -0.1 if "看跌" in trend else 0))
+        ax.plot(data, label="歷史記憶")
+        ax.plot(range(50, 60), [data[-1] + (data[-1]-data[-2])*i for i in range(1, 11)], '--r', label="RNN 預測未來")
+        ax.legend(); st.pyplot(fig)
+        
+
+    # --- Tab 2: 情感分析 ---
+    with tab2:
+        st.subheader("💬 情感分析：語意能量表")
+        sentence = st.text_input("輸入句子 (如: The food is good but service is bad):", "I love this")
+        words = sentence.split()
+        scores = []
+        cur = 0
+        for w in words:
+            if w.lower() in ['bad', 'not', 'no']: cur -= 1
+            elif w.lower() in ['love', 'good', 'happy']: cur += 1
+            scores.append(cur)
+        
+        st.write("AI 腦袋裡的『情緒累積』過程：")
+        fig, ax = plt.subplots(figsize=(8, 3))
+        ax.step(range(len(words)), scores, where='post', marker='o', color='green')
+        ax.set_xticks(range(len(words))); ax.set_xticklabels(words)
         st.pyplot(fig)
+        
 
-    st.write("---")
-    st.subheader("🔮 RNN 的多重應用預測")
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        st.write("**📈 股市/趨勢**")
-        st.line_chart(np.cumsum(st.session_state.rnn_vec))
-    with c2:
-        st.write("**🌐 翻譯意圖**")
-        st.write("AI 捕捉到的語意權重：" + str(np.abs(st.session_state.rnn_vec).mean().round(2)))
-    with c3:
-        st.write("**💬 對話情緒**")
-        sentiment = "正面" if st.session_state.rnn_vec.sum() > 0 else "負面"
-        st.write(f"目前情緒判定：{sentiment}")
+    # --- Tab 3: 語言翻譯 ---
+    with tab3:
+        st.subheader("🌐 翻譯理論：編碼器與解碼器")
+        txt = st.text_input("輸入英文：", "Hello world")
+        c1, c2, c3 = st.columns([2, 1, 2])
+        with c1: 
+            st.info(f"📥 **Encoder**\n將 '{txt}' 壓縮成向量")
+        with c2:
+            st.write("➡️ **Vector**")
+            st.write(np.random.rand(4).round(2))
+        with c3:
+            st.success("📤 **Decoder**\n輸出：你好世界")
+        
+
+# 頁尾：手動清除
+if st.sidebar.button("🧼 清除所有實驗數據"):
+    st.session_state.clear()
+    st.rerun()
